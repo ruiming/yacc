@@ -1,16 +1,9 @@
-import java.io.BufferedReader;
-import java.io.FileInputStream;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.util.*;
 
 class Main {
     // 存储BNF
     private static Map<String, String> map = new LinkedHashMap<>();
-    // 存储所有符号的父节点
-    private static Map<String, List<String>> parents = new HashMap<>();
-    // 存储所有句柄的父节点
-    private static Map<String, List<String>> head = new HashMap<>();
     // 存储所有符号的 First 集合
     private static Map<String, List<String>> first = new HashMap<>();
     // 存储所有符号的 Follow 集合
@@ -20,8 +13,7 @@ class Main {
 
     public static void main(String args[]) throws Exception {
         try {
-            // readBnf("C:\\Users\\ruiming\\Dropbox\\yacc\\testcases\\testcase8\\input.bnf");
-            readBnf(args[0]);
+            readBnf(args[0] + "\\input.bnf");
             calculateFirstCollection();
             calculateFollowCollection();
             checkRecursion();
@@ -30,11 +22,19 @@ class Main {
             System.out.println(e.toString());
             System.exit(0);
         }
-        // System.out.println(test("C:\\Users\\ruiming\\Dropbox\\yacc\\testcases\\testcase8\\tokenstream7.tok"));
-        System.out.println(test(args[1]));
+        System.out.println("LL! Parser Build OK, Testing Now");
+        File[] files = getTestFiles(args[0]);
+        for (File file : files) {
+            boolean result = test(file.getAbsolutePath());
+            if (result) {
+                System.out.println("TRUE  " + file.getName());
+            } else {
+                System.out.println("FALSE " + file.getName());
+            }
+        }
     }
 
-    // 构造 First 集和判断左递归
+    // 构造 First 集
     private static void calculateFirstCollection() throws Exception {
         Set<String> bnf = map.keySet();
         int putCount = 1;
@@ -44,12 +44,11 @@ class Main {
                 String value = map.get(key).trim();
                 String[] items = value.split("\\|");
                 // parent[value].add(key)
-                addToList(key, value, parents);
                 for (String item : items) {
                     String[] words = item.trim().split(" ");
                     boolean empty = true;
                     for (String word : words) {
-                        if (empty && (getParents(key).contains(word) || key.equals(word))) {
+                        if (empty && key.equals(word)) {
                             // 构造 First 集出问题，存在左递归
                             throw new Exception("Illegal LL1 grammar(Exists Left Recursion)");
                         } else if (empty && !getFirst(key).containsAll(getFirst(word))) {
@@ -58,17 +57,11 @@ class Main {
                                 // first[key].add(w)
                                 addToList(w, key, first);
                             }
-                            // head[word].add(key)
-                            addToList(key, word, head);
                         } else {
                             break;
                         }
                         empty = getFirst(word).contains("\"\"");
                     }
-                }
-                // 简单判断二义性
-                if (getParent(value).size() > 1) {
-                    throw new Exception("Illegal LL1 grammar(Exists Ambiguity)");
                 }
             }
         }
@@ -319,29 +312,6 @@ class Main {
         }
     }
 
-    // 获取直接父节点
-    private static List<String> getParent(String i) {
-        if (parents.get(i) == null) {
-            return new ArrayList<>();
-        } else {
-            return parents.get(i);
-        }
-    }
-
-    // 获取所有父节点
-    private static List<String> getParents(String key) {
-        if (parents.get(key) == null) {
-            return new ArrayList<>();
-        } else {
-            List<String> rows = new ArrayList<>();
-            List<String> items = parents.get(key);
-            for (String item: items) {
-                rows.addAll(getParents(item));
-            }
-            return rows;
-        }
-    }
-
     // 读取并解析 BNF 文件到 Map
     private static void readBnf(String path) throws Exception {
         InputStream is        = new FileInputStream(path);
@@ -362,6 +332,23 @@ class Main {
         }
         reader.close();
         is.close();
+    }
+
+    // 读取测试文件
+    private static File[] getTestFiles(String path) throws Exception {
+        File[] files = (new File(path)).listFiles(new FileFilter() {
+            public boolean accept(File pathname) {
+                return pathname.isFile() && pathname.getName().contains(".tok");
+            }
+        });
+        Arrays.sort(files, new Comparator<File>(){
+            public int compare(File f1, File f2) {
+                String s1 = f1.getName().substring(11, f1.getName().indexOf("."));
+                String s2 = f2.getName().substring(11, f2.getName().indexOf("."));
+                return Integer.valueOf(s1).compareTo(Integer.valueOf(s2));
+            }
+        });
+        return files;
     }
 
 }
