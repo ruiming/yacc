@@ -1,5 +1,8 @@
+import java.io.BufferedReader;
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.util.*;
-import java.io.*;
 
 class Main {
     // 存储BNF
@@ -16,8 +19,9 @@ class Main {
     private static Map<String, Map<String, String>> table = new HashMap<>();
 
     public static void main(String args[]) throws Exception {
-        readBnf("C:\\Users\\ruiming\\Dropbox\\yacc\\out\\production\\yacc\\test.txt");
         try {
+            // readBnf("C:\\Users\\ruiming\\Dropbox\\yacc\\testcases\\testcase8\\input.bnf");
+            readBnf(args[0]);
             calculateFirstCollection();
             calculateFollowCollection();
             checkRecursion();
@@ -26,8 +30,8 @@ class Main {
             System.out.println(e.toString());
             System.exit(0);
         }
-        System.out.println(test("C:\\Users\\ruiming\\Dropbox\\yacc\\testcases\\test1.txt"));
-        System.out.println();
+        // System.out.println(test("C:\\Users\\ruiming\\Dropbox\\yacc\\testcases\\testcase8\\tokenstream7.tok"));
+        System.out.println(test(args[1]));
     }
 
     // 构造 First 集和判断左递归
@@ -62,7 +66,7 @@ class Main {
                         empty = getFirst(word).contains("\"\"");
                     }
                 }
-                // TODO: 简单判断二义性
+                // 简单判断二义性
                 if (getParent(value).size() > 1) {
                     throw new Exception("Illegal LL1 grammar(Exists Ambiguity)");
                 }
@@ -134,7 +138,6 @@ class Main {
             boolean flag = false;
             List<String> list = new ArrayList<>();
             for (String item : items) {
-                item = item.trim().split(" ")[0];
                 // FIRST(a) 和 FIRST(b) 不相交
                 List<String> firstList = getFirstOfHandle(item);
                 if (firstList.contains("\"\"")) {
@@ -142,9 +145,9 @@ class Main {
                 }
                 for (String word: list) {
                     if (firstList.contains(word)) {
-                        throw new Exception("Illegal LL1 grammar(Not LL1 Can Handle)");
+                        throw new Exception("Illegal LL1 grammar(Multi Ways To Choose)");
                     }
-                    if (flag && getFollow(key).contains(word)) {
+                    if (flag && getFollowOfHandle(key).contains(word)) {
                         throw new Exception("Illegal LL1 grammar(Exists Left Recursion)");
                     }
                 }
@@ -196,6 +199,9 @@ class Main {
         Stack<String> stack   = new Stack<>();
         String top            = map.keySet().iterator().next();
         String line           = reader.readLine();
+        if (line == null) {
+            line = "$";
+        }
         stack.push(top);
         while (!stack.isEmpty()) {
             if (stack.peek().equals(line.trim())) {
@@ -220,19 +226,39 @@ class Main {
         }
         reader.close();
         is.close();
-        return true;
+        return line.equals("$");
     }
 
     // 获取指定句柄的 First 集
     private static List<String> getFirstOfHandle(String handle) {
         List<String> list = new ArrayList<>();
+        boolean none = true;
         for (String item : handle.trim().split(" ")) {
             list.addAll(getFirst(item));
-            if (!list.contains("\"\"")) {
+            if (list.contains("\"\"")) {
+                list.remove("\"\"");
+            } else {
+                none = false;
                 break;
             }
         }
+        if (none) {
+            list.add("\"\"");
+        }
         return list;
+    }
+
+    // 获取指定句柄的 Follow 集
+    private static List<String> getFollowOfHandle(String handle) {
+        Set<String> ends = getEndSyntax();
+        String[] items = handle.trim().split(" ");
+        if (ends.contains(items[items.length - 1])) {
+            List<String> temp = new ArrayList<>();
+            temp.add(items[items.length - 1]);
+            return temp;
+        } else {
+            return getFollow(items[items.length - 1]);
+        }
     }
 
     // 获取指定 key 的 First 集
@@ -322,7 +348,7 @@ class Main {
         BufferedReader reader = new BufferedReader(new InputStreamReader(is));
         String line           = reader.readLine();
         while (line != null) {
-            String[] items = line.split("::=");
+            String[] items = line.split(" ::= ");
             if (items.length != 2) {
                 throw new Exception("Illegal BNF file!");
             } else {
