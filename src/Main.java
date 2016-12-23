@@ -2,73 +2,322 @@ import java.util.*;
 import java.io.*;
 
 class Main {
-    public static Map<String, String> map = new HashMap<String, String>();
-    public static Map<String, String> parent = new HashMap<String, String>();
+    // 存储BNF
+    private static Map<String, String> map = new LinkedHashMap<>();
+    // 存储所有符号的父节点
+    private static Map<String, List<String>> parents = new HashMap<>();
+    // 存储所有句柄的父节点
+    private static Map<String, List<String>> head = new HashMap<>();
+    // 存储所有符号的 First 集合
+    private static Map<String, List<String>> first = new HashMap<>();
+    // 存储所有符号的 Follow 集合
+    private static Map<String, List<String>> follow = new HashMap<>();
+    // 存储分析表
+    private static Map<String, Map<String, String>> table = new HashMap<>();
 
     public static void main(String args[]) throws Exception {
-        Main.readBnf("./test.txt");
-        System.out.println(Main.checkRecursive());
+        readBnf("C:\\Users\\ruiming\\Dropbox\\yacc\\out\\production\\yacc\\test.txt");
+        try {
+            calculateFirstCollection();
+            calculateFollowCollection();
+            checkRecursion();
+            buildTable();
+        } catch (Exception e) {
+            System.out.println(e.toString());
+            System.exit(0);
+        }
+        System.out.println(test("C:\\Users\\ruiming\\Dropbox\\yacc\\testcases\\test1.txt"));
+        System.out.println();
     }
-    
+
+    // 构造 First 集和判断左递归
+    private static void calculateFirstCollection() throws Exception {
+        Set<String> bnf = map.keySet();
+        int putCount = 1;
+        while (putCount != 0) {
+            putCount = 0;
+            for (String key : bnf) {
+                String value = map.get(key).trim();
+                String[] items = value.split("\\|");
+                // parent[value].add(key)
+                addToList(key, value, parents);
+                for (String item : items) {
+                    String[] words = item.trim().split(" ");
+                    boolean empty = true;
+                    for (String word : words) {
+                        if (empty && (getParents(key).contains(word) || key.equals(word))) {
+                            // 构造 First 集出问题，存在左递归
+                            throw new Exception("Illegal LL1 grammar(Exists Left Recursion)");
+                        } else if (empty && !getFirst(key).containsAll(getFirst(word))) {
+                            putCount ++;
+                            for (String w : getFirst(word)) {
+                                // first[key].add(w)
+                                addToList(w, key, first);
+                            }
+                            // head[word].add(key)
+                            addToList(key, word, head);
+                        } else {
+                            break;
+                        }
+                        empty = getFirst(word).contains("\"\"");
+                    }
+                }
+                // TODO: 简单判断二义性
+                if (getParent(value).size() > 1) {
+                    throw new Exception("Illegal LL1 grammar(Exists Ambiguity)");
+                }
+            }
+        }
+    }
+
+    // 构造 Follow 集
+    private static void calculateFollowCollection() throws Exception {
+        Set<String> bnf = map.keySet();
+        // follow(S).add("$")
+        addToList("$", map.keySet().iterator().next(), follow);
+        // 获取终结符号
+        Set<String> ends = getEndSyntax();
+        int putCount = 1;
+        while (putCount != 0) {
+            putCount = 0;
+            for (String key : bnf) {
+                String value = map.get(key).trim();
+                String[] items = value.split("\\|");
+                for (String item : items) {
+                    String[] words = item.trim().split(" ");
+                    int length = words.length;
+                    // A -> aBb
+                    for (int i=1; i<length; i++) {
+                        if (!ends.contains(words[i - 1])) {
+                            for (String p : getFirstOfHandle(item.substring(item.indexOf(words[i])).trim())) {
+                                if (!p.equals("\"\"") && !getFollow(words[i - 1]).contains(p)) {
+                                    // follow[words[i-1]].add(p)
+                                    putCount ++;
+                                    addToList(p, words[i - 1], follow);
+                                }
+                            }
+                        }
+                    }
+                    int i = length;
+                    // A -> aB
+                    if (!ends.contains(words[i - 1])) {
+                        for (String p : getFollow(key)) {
+                            if (!p.equals("\"\"") && !getFollow(words[i - 1]).contains(p)) {
+                                addToList(p, words[i - 1], follow);
+                                putCount ++;
+                            }
+                        }
+                    }
+                    // A -> aBb 且 FIRST(b).contains("\"\"")
+                    while (i --> 1) {
+                        String temp = item.substring(item.indexOf(words[i])).trim();
+                        if (getFirstOfHandle(temp).contains("\"\"") && !ends.contains(words[i])) {
+                        for (String p : getFollow(key)) {
+                            if (!p.equals("\"\"") && !getFollow(words[i - 1]).contains(p)) {
+                                addToList(p, words[i - 1], follow);
+                                putCount ++;
+                            }
+                        }
+                        break;
+                    }
+                    }
+                }
+            }
+        }
+    }
+
     // 判断是否为 LL1 文法
-    // 判断左递归
-    private static boolean checkRecursive() {
-        Set<String> bnf        = map.keySet();
-        Iterator<String> it    = bnf.iterator();
-        List<Set<String>> rows = new ArrayList<Set<String>>();
-        while (it.hasNext()) {
-            String key       = it.next().trim();
-            String value     = map.get(key).trim();
-            String[] items   = value.split("\\|");
-            Set<String> sets = new LinkedHashSet<String>();
-            boolean newSet   = true;
-            // Set 模拟并查集
-            for (Set<String>row: rows) {
-                if (row.contains(key)) {
-                    sets = row;
-                    newSet = false;
-                    break;
+    private static void checkRecursion() throws Exception {
+        for (String key: map.keySet()) {
+            String value = map.get(key).trim();
+            String[] items = value.split("\\|");
+            boolean flag = false;
+            List<String> list = new ArrayList<>();
+            for (String item : items) {
+                item = item.trim().split(" ")[0];
+                // FIRST(a) 和 FIRST(b) 不相交
+                List<String> firstList = getFirstOfHandle(item);
+                if (firstList.contains("\"\"")) {
+                    flag = true;
+                }
+                for (String word: list) {
+                    if (firstList.contains(word)) {
+                        throw new Exception("Illegal LL1 grammar(Not LL1 Can Handle)");
+                    }
+                    if (flag && getFollow(key).contains(word)) {
+                        throw new Exception("Illegal LL1 grammar(Exists Left Recursion)");
+                    }
+                }
+                list.addAll(firstList);
+            }
+        }
+    }
+
+    // 构造分析表
+    private static void buildTable() {
+        Set<String> bnf = map.keySet();
+        Set<String> ends = getEndSyntax();
+        for (String key : bnf) {
+            String value = map.get(key).trim();
+            String[] items = value.split("\\|");
+            Map<String, String> next = getNext(key);
+            for (String item : items) {
+                for (String syntax: getFirstOfHandle(item.trim())) {
+                    if (ends.contains(syntax) && !syntax.equals("\"\"")) {
+                        next.put(syntax, item.trim());
+                        table.put(key, next);
+                    }
+                }
+                if (getFirstOfHandle(item.trim()).contains("\"\"")) {
+                    for (String syntax: getFollow(key)) {
+                        if (ends.contains(syntax) && !syntax.equals("\"\"")) {
+                            next.put(syntax, item.trim());
+                            table.put(key, next);
+                        }
+                    }
                 }
             }
-            if (newSet) sets.add(key);
-            for (String item: items) {
-                item = item.trim().split(" ");
-                // 判断直接左递归和间接左递归
-                if (sets.contains(item.trim())) {
-                    return false;
-                } else {
-                    sets.add(item.trim());
+        }
+    }
+
+    // 获取 Next
+    private static Map<String, String> getNext(String key) {
+        if (table.get(key) == null) {
+            return new HashMap<>();
+        } else {
+            return table.get(key);
+        }
+    }
+
+    // 判断输入是否符合语法定义
+    private static boolean test(String path) throws Exception {
+        InputStream is        = new FileInputStream(path);
+        BufferedReader reader = new BufferedReader(new InputStreamReader(is));
+        Stack<String> stack   = new Stack<>();
+        String top            = map.keySet().iterator().next();
+        String line           = reader.readLine();
+        stack.push(top);
+        while (!stack.isEmpty()) {
+            if (stack.peek().equals(line.trim())) {
+                stack.pop();
+                line = reader.readLine();
+                if (line == null) {
+                    line = "$";
+                }
+            } else if (getEndSyntax().contains(stack.peek())) {
+                return false;
+            } else if (table.get(stack.peek()) == null || table.get(stack.peek()).get(line) == null) {
+                return false;
+            } else {
+                String[] items = table.get(stack.peek()).get(line).split(" ");
+                stack.pop();
+                for (int i=items.length-1; i>=0; --i) {
+                    if (!items[i].equals("\"\"")) {
+                        stack.push(items[i]);
+                    }
                 }
             }
-            if (newSet) rows.add(sets);
         }
-        // 判断间接左递归
-        for (Set<String>row: rows) {
-            it = row.iterator();  
-            while (it.hasNext()) {  
-                String str = it.next();  
-                System.out.print(str);  
-            }  
-            System.out.println("");
-        }
+        reader.close();
+        is.close();
         return true;
     }
 
-    // 并查集
-    private static void Union(String i, String j) {
-        Map.put(i, j);
+    // 获取指定句柄的 First 集
+    private static List<String> getFirstOfHandle(String handle) {
+        List<String> list = new ArrayList<>();
+        for (String item : handle.trim().split(" ")) {
+            list.addAll(getFirst(item));
+            if (!list.contains("\"\"")) {
+                break;
+            }
+        }
+        return list;
     }
 
-    private static String Find(String i) {
-        while (Map.get(i) != null) {
-            i = Map.get(i);
+    // 获取指定 key 的 First 集
+    private static List<String> getFirst(String key) {
+        Set<String> ends = getEndSyntax();
+        if (first.get(key) != null) {
+            return first.get(key);
+        } else {
+            // 判断是否为非终结符号
+            if (!map.containsKey(key) && ends.contains(key)) {
+                List<String> row = new ArrayList<>();
+                row.add(key);
+                first.put(key, row);
+                return row;
+            } else {
+                return new ArrayList<>();
+            }
         }
-        return i;
+    }
+
+    // 获取指定 key 的 Follow 集
+    private static List<String> getFollow(String key) {
+        if (follow.get(key) != null) {
+            return follow.get(key);
+        } else {
+            return new ArrayList<>();
+        }
+    }
+
+    // 获取终结符号
+    private static Set<String> getEndSyntax() {
+        Set<String> bnf = map.keySet();
+        Set<String> syntax = new HashSet<>();
+        for (String key : bnf) {
+            String value = map.get(key).trim();
+            String[] items = value.split("\\|");
+            for (String item: items) {
+                for (String word: item.split(" ")) {
+                    // 没有在产生式左端出现则为非终结符号
+                    if (!bnf.contains(word.trim())) {
+                        syntax.add(word.trim());
+                    }
+                }
+            }
+        }
+        syntax.add("$");
+        return syntax;
+    }
+
+    // list[j].add(i)
+    private static void addToList(String parent, String child, Map<String, List<String>> list) {
+        if (list.get(child) == null) {
+            List<String> row = new ArrayList<>();
+            row.add(parent);
+            list.put(child, row);
+        } else if (!list.get(child).contains(parent)) {
+            list.get(child).add(parent);
+        }
+    }
+
+    // 获取直接父节点
+    private static List<String> getParent(String i) {
+        if (parents.get(i) == null) {
+            return new ArrayList<>();
+        } else {
+            return parents.get(i);
+        }
+    }
+
+    // 获取所有父节点
+    private static List<String> getParents(String key) {
+        if (parents.get(key) == null) {
+            return new ArrayList<>();
+        } else {
+            List<String> rows = new ArrayList<>();
+            List<String> items = parents.get(key);
+            for (String item: items) {
+                rows.addAll(getParents(item));
+            }
+            return rows;
+        }
     }
 
     // 读取并解析 BNF 文件到 Map
     private static void readBnf(String path) throws Exception {
-        StringBuffer sb       = new StringBuffer();
         InputStream is        = new FileInputStream(path);
         BufferedReader reader = new BufferedReader(new InputStreamReader(is));
         String line           = reader.readLine();
@@ -77,11 +326,16 @@ class Main {
             if (items.length != 2) {
                 throw new Exception("Illegal BNF file!");
             } else {
-                map.put(items[0].trim(), items[1].trim());
+                if (map.get(items[0].trim()) != null) {
+                    map.replace(items[0].trim(), map.get(items[0].trim()) + " | " + items[1].trim());
+                } else {
+                    map.put(items[0].trim(), items[1].trim());
+                }
                 line = reader.readLine();
             }
         }
         reader.close();
         is.close();
     }
+
 }
